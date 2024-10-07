@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Obtener Coordenadas</title>
+</head>
+<body>
+
+<h2>Cargar archivo Excel</h2>
+<input type="file" id="upload" accept=".xlsx">
+<br><br>
+
+<h2>Seleccionar Columna de Direcciones</h2>
+<select id="column-select">
+    <option value="">Seleccionar columna</option>
+</select>
+<br><br>
+
+<button id="get-coordinates">Obtener Coordenadas</button>
+<br><br>
+
+<h3>Resultados:</h3>
+<div id="results"></div>
+
+<!-- Botón de descarga, oculto inicialmente -->
+<a id="download-link" style="display: none;">Descargar archivo con coordenadas</a>
+
+<!-- Librería XLSX para leer y generar archivos Excel -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.16.9/xlsx.full.min.js"></script>
+
+<script>
+// Leer archivo Excel
+document.getElementById('upload').addEventListener('change', handleFile, false);
+
+let workbook;
+let headers = [];
+let finalData = [];
+
+function handleFile(event) {
+    const file = event.target.files[0];
+    const reader = new FileReader();
+    
+    reader.onload = function(e) {
+        const data = new Uint8Array(e.target.result);
+        workbook = XLSX.read(data, { type: 'array' });
+        const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+        headers = XLSX.utils.sheet_to_json(firstSheet, { header: 1 })[0]; // Obtener los headers
+        
+        // Rellenar el menú desplegable con los nombres de las columnas
+        const select = document.getElementById('column-select');
+        select.innerHTML = ''; // Limpiar
+        headers.forEach((header, index) => {
+            const option = document.createElement('option');
+            option.value = index;
+            option.text = header;
+            select.appendChild(option);
+        });
+    };
+    
+    reader.readAsArrayBuffer(file);
+}
+
+// Obtener coordenadas a partir de las direcciones seleccionadas
+document.getElementById('get-coordinates').addEventListener('click', function() {
+    const selectedColumnIndex = document.getElementById('column-select').value;
+    if (selectedColumnIndex === "") {
+        alert("Por favor, selecciona una columna de direcciones");
+        return;
+    }
+
+    const sheet = workbook.Sheets[workbook.SheetNames[0]];
+    const data = XLSX.utils.sheet_to_json(sheet, { header: 1 });
+    const addresses = data.map(row => row[selectedColumnIndex]);
+
+    // Inicializar finalData con las direcciones y añadir las columnas para X y Y
+    finalData = data.map((row, index) => {
+        return [...row, 'X', 'Y']; // Añadir columnas "X" y "Y" a cada fila
+    });
+
+    // Procesar todas las direcciones con retardo para evitar sobrecarga en la API
+    processAddresses(addresses);
+});
+
+// Función para procesar las direcciones con un retardo entre peticiones
+function processAddresses(addresses) {
+    let index = 1; // Comenzamos desde 1 para evitar el header
+    const delay = 1000; // 1 segundo de retardo entre cada petición
+
+    function processNext() {
+        if (index < addresses.length) {
+            getCoordinates(addresses[index], index);
+            index++;
+            setTimeout(processNext, delay); // Llamar a la siguiente dirección después del retardo
+        } else {
+            generateExcel(); // Generar el archivo Excel cuando se hayan procesado todas las direcciones
+        }
+    }
+
+    processNext(); // Iniciar el proceso
+}
+
+// Función para obtener coordenadas de una dirección usando una API (ej. OpenStreetMap)
+function getCoordinates(address, index) {
+    const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(address)}&format=json`;
+
+    fetch(url)
+        .then(response => response.json())
+        .then(data => {
+            if (data.length > 0) {
+                const lat = data[0].lat;
+                const lon = data[0].lon;
+                displayResult(address, lat, lon);
+                // Guardar las coordenadas en finalData
+                finalData[index][finalData[index].length - 2] = lat;
+                finalData[index][finalData[index].length - 1] = lon;
+            } else {
+                displayResult(address, 'No encontrada', 'No encontrada');
+                // Guardar 0 en finalData en lugar de 'No encontrada'
+                finalData[index][finalData[index].length - 2] = 0;
+                finalData[index][finalData[index].length - 1] = 0;
+            }
+        })
+        .catch(error => {
+            console.error("Error al obtener las coordenadas:", error);
+            displayResult(address, 'Error', 'Error');
+            finalData[index][finalData[index].length - 2] = 'Error';
+            finalData[index][finalData[index].length - 1] = 'Error';
+        });
+}
+
+function displayResult(address, lat, lon) {
+    const resultsDiv = document.getElementById('results');
+    const p = document.createElement('p');
+    p.textContent = `Dirección: ${address} | Latitud: ${lat} | Longitud: ${lon}`;
+    resultsDiv.appendChild(p);
+}
+
+// Generar el archivo Excel con las coordenadas y proporcionar un enlace de descarga
+function generateExcel() {
+    const ws = XLSX.utils.aoa_to_sheet(finalData); // Convertir finalData en una hoja de cálculo
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Coordenadas");
+
+    const wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+
+    const blob = new Blob([wbout], { type: "application/octet-stream" });
+
+    // Crear el enlace de descarga
+    const link = document.getElementById('download-link');
+    link.href = URL.createObjectURL(blob);
+    link.download = 'direcciones_con_coordenadas.xlsx';
+    link.style.display = 'block'; // Mostrar el enlace de descarga
+}
+</script>
+
+</body>
+</html>
