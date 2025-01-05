@@ -3,156 +3,145 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Obtener Coordenadas</title>
+    <title>Terrazas Providencia</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/tokml@0.4.0/tokml.min.js"></script>
+    <style>
+        #map { height: 600px; width: 100%; }
+        .download-button { margin-top: 10px; display: block; text-align: center; }
+    </style>
 </head>
 <body>
+    <h1>Terrazas en SECPLA sin registro en RENTAS</h1>
+    <div id="map"></div>
+    <button id="kmzButton" class="download-button">Convertir a KMZ</button>
+    <button id="geojsonButton" class="download-button">Descargar GeoJSON</button>
 
-<h2>Cargar archivo Excel</h2>
-<input type="file" id="upload" accept=".xlsx">
-<br><br>
+    <script>
+        // Inicializar el mapa
+        const map = L.map('map').setView([-33.4489, -70.6693], 12); // Coordenadas iniciales (Santiago)
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            maxZoom: 19,
+            attribution: '© OpenStreetMap contributors'
+        }).addTo(map);
 
-<h2>Seleccionar Columna de Direcciones</h2>
-<select id="column-select">
-    <option value="">Seleccionar columna</option>
-</select>
-<br><br>
+        // Almacenar los puntos para exportarlos
+        let markers = [];
 
-<button id="get-coordinates">Obtener Coordenadas</button>
-<br><br>
+        // URL del archivo CSV (cambiar si es necesario)
+        const csvUrl = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vQKCCPRxUwaXo-LXGeUQgZSCzVWZdIYiHNiY51_-u4AG0yODEfv4qd_ErKxQ-6RuQ/pub?gid=599326445&single=true&output=csv';
 
-<h3>Resultados:</h3>
-<div id="results"></div>
+        // Obtener los datos del CSV usando fetch
+        fetch(csvUrl)
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error('Network response was not ok');
+                }
+                return response.text();
+            })
+            .then(data => {
+                // Parsear los datos del CSV con PapaParse
+                Papa.parse(data, {
+                    header: true,
+                    complete: function(results) {
+                        const data = results.data; // Filas del CSV
+                        if (data.length === 0) {
+                            console.error('El archivo CSV está vacío o no tiene datos válidos.');
+                            return;
+                        }
 
-<!-- Botón de descarga, oculto inicialmente -->
-<a id="download-link" style="display: none;">Descargar archivo con coordenadas</a>
+                        data.forEach((row, index) => {
+                            const lat = parseFloat(row.Y); // Columna 'Y' (latitud)
+                            const lon = parseFloat(row.X); // Columna 'X' (longitud)
+                            const name = row.LOCAL || `Punto ${index + 1}`; // Usar columna LOCAL o nombre genérico
+                            const direccion = row.DIRECCIÓN || 'Dirección no disponible'; // Dirección desde la columna A
+                            const local = row.LOCAL || 'No aplica';
+                            const foto = row.FOTO || ''; // Obtener el enlace de la foto, si existe
 
-<!-- Librería XLSX para leer y generar archivos Excel -->
-<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.16.9/xlsx.full.min.js"></script>
+                            // Validar coordenadas
+                            if (!isNaN(lat) && !isNaN(lon)) {
+                                // Crear contenido del popup
+                                let popupContent = `  
+                                    <strong>${name}</strong><br>
+                                    Dirección: ${direccion}<br>
+                                    Local: ${local}<br>
+                                    Lat: ${lat}, Lon: ${lon}
+                                `;
 
-<script>
-// Leer archivo Excel
-document.getElementById('upload').addEventListener('change', handleFile, false);
+                                // Si hay una foto válida, agregarla al contenido del popup
+                                if (foto) {
+                                    popupContent += `
+                                        <br><strong>Foto:</strong><br>
+                                        <img src="${foto}" alt="Imagen del lugar" style="width: 200px; height: auto;">
+                                    `;
+                                }
 
-let workbook;
-let headers = [];
-let finalData = [];
+                                const marker = L.marker([lat, lon])
+                                    .addTo(map)
+                                    .bindPopup(popupContent);
 
-function handleFile(event) {
-    const file = event.target.files[0];
-    const reader = new FileReader();
-    
-    reader.onload = function(e) {
-        const data = new Uint8Array(e.target.result);
-        workbook = XLSX.read(data, { type: 'array' });
-        const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
-        headers = XLSX.utils.sheet_to_json(firstSheet, { header: 1 })[0]; // Obtener los headers
-        
-        // Rellenar el menú desplegable con los nombres de las columnas
-        const select = document.getElementById('column-select');
-        select.innerHTML = ''; // Limpiar
-        headers.forEach((header, index) => {
-            const option = document.createElement('option');
-            option.value = index;
-            option.text = header;
-            select.appendChild(option);
+                                markers.push({
+                                    lat: lat,
+                                    lon: lon,
+                                    properties: { name, direccion, local, foto }
+                                });
+                            } else {
+                                console.warn(`Coordenadas inválidas en fila ${index + 1}: ${JSON.stringify(row)}`);
+                            }
+                        });
+                    },
+                    error: function(error) {
+                        console.error('Error al procesar el CSV:', error);
+                    }
+                });
+            })
+            .catch(error => {
+                console.error('There has been a problem with your fetch operation:', error);
+            });
+
+        // Función para convertir a KMZ
+        document.getElementById('kmzButton').addEventListener('click', function() {
+            const geojson = {
+                type: "FeatureCollection",
+                features: markers.map(marker => ({
+                    type: "Feature",
+                    properties: marker.properties,
+                    geometry: {
+                        type: "Point",
+                        coordinates: [marker.lon, marker.lat]
+                    }
+                }))
+            };
+
+            const kml = tokml(geojson);
+            const zip = new JSZip();
+            zip.file("doc.kml", kml);
+            zip.generateAsync({ type: "blob" }).then(function(content) {
+                saveAs(content, "terrazas_providencia.kmz");
+            });
         });
-    };
-    
-    reader.readAsArrayBuffer(file);
-}
 
-// Obtener coordenadas a partir de las direcciones seleccionadas
-document.getElementById('get-coordinates').addEventListener('click', function() {
-    const selectedColumnIndex = document.getElementById('column-select').value;
-    if (selectedColumnIndex === "") {
-        alert("Por favor, selecciona una columna de direcciones");
-        return;
-    }
+        // Función para descargar GeoJSON
+        document.getElementById('geojsonButton').addEventListener('click', function() {
+            const geojson = {
+                type: "FeatureCollection",
+                features: markers.map(marker => ({
+                    type: "Feature",
+                    properties: marker.properties,
+                    geometry: {
+                        type: "Point",
+                        coordinates: [marker.lon, marker.lat]
+                    }
+                }))
+            };
 
-    const sheet = workbook.Sheets[workbook.SheetNames[0]];
-    const data = XLSX.utils.sheet_to_json(sheet, { header: 1 });
-    const addresses = data.map(row => row[selectedColumnIndex]);
-
-    // Inicializar finalData con las direcciones y añadir las columnas para X y Y
-    finalData = data.map((row, index) => {
-        return [...row, 'X', 'Y']; // Añadir columnas "X" y "Y" a cada fila
-    });
-
-    // Procesar todas las direcciones con retardo para evitar sobrecarga en la API
-    processAddresses(addresses);
-});
-
-// Función para procesar las direcciones con un retardo entre peticiones
-function processAddresses(addresses) {
-    let index = 1; // Comenzamos desde 1 para evitar el header
-    const delay = 1000; // 1 segundo de retardo entre cada petición
-
-    function processNext() {
-        if (index < addresses.length) {
-            getCoordinates(addresses[index], index);
-            index++;
-            setTimeout(processNext, delay); // Llamar a la siguiente dirección después del retardo
-        } else {
-            generateExcel(); // Generar el archivo Excel cuando se hayan procesado todas las direcciones
-        }
-    }
-
-    processNext(); // Iniciar el proceso
-}
-
-// Función para obtener coordenadas de una dirección usando una API (ej. OpenStreetMap)
-function getCoordinates(address, index) {
-    const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(address)}&format=json`;
-
-    fetch(url)
-        .then(response => response.json())
-        .then(data => {
-            if (data.length > 0) {
-                const lat = data[0].lat;
-                const lon = data[0].lon;
-                displayResult(address, lat, lon);
-                // Guardar las coordenadas en finalData
-                finalData[index][finalData[index].length - 2] = lat;
-                finalData[index][finalData[index].length - 1] = lon;
-            } else {
-                displayResult(address, 'No encontrada', 'No encontrada');
-                // Guardar 0 en finalData en lugar de 'No encontrada'
-                finalData[index][finalData[index].length - 2] = 0;
-                finalData[index][finalData[index].length - 1] = 0;
-            }
-        })
-        .catch(error => {
-            console.error("Error al obtener las coordenadas:", error);
-            displayResult(address, 'Error', 'Error');
-            finalData[index][finalData[index].length - 2] = 'Error';
-            finalData[index][finalData[index].length - 1] = 'Error';
+            const blob = new Blob([JSON.stringify(geojson, null, 2)], { type: "application/json" });
+            saveAs(blob, "terrazas_providencia.geojson");
         });
-}
-
-function displayResult(address, lat, lon) {
-    const resultsDiv = document.getElementById('results');
-    const p = document.createElement('p');
-    p.textContent = `Dirección: ${address} | Latitud: ${lat} | Longitud: ${lon}`;
-    resultsDiv.appendChild(p);
-}
-
-// Generar el archivo Excel con las coordenadas y proporcionar un enlace de descarga
-function generateExcel() {
-    const ws = XLSX.utils.aoa_to_sheet(finalData); // Convertir finalData en una hoja de cálculo
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "Coordenadas");
-
-    const wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
-
-    const blob = new Blob([wbout], { type: "application/octet-stream" });
-
-    // Crear el enlace de descarga
-    const link = document.getElementById('download-link');
-    link.href = URL.createObjectURL(blob);
-    link.download = 'direcciones_con_coordenadas.xlsx';
-    link.style.display = 'block'; // Mostrar el enlace de descarga
-}
-</script>
-
+    </script>
 </body>
 </html>
