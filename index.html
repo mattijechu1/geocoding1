@@ -54,6 +54,9 @@
                             return;
                         }
 
+                        // Depuración: Verificar el contenido del CSV
+                        console.log("Datos CSV procesados:", data);
+
                         data.forEach((row, index) => {
                             const lat = parseFloat(row.Y); // Columna 'Y' (latitud)
                             const lon = parseFloat(row.X); // Columna 'X' (longitud)
@@ -61,6 +64,9 @@
                             const direccion = row.DIRECCIÓN || 'Dirección no disponible'; // Dirección desde la columna A
                             const local = row.LOCAL || 'No aplica';
                             const foto = row.FOTO || ''; // Obtener el enlace de la foto, si existe
+
+                            // Depuración: Imprimir las coordenadas para cada fila
+                            console.log(`Coordenadas fila ${index + 1}: Lat: ${lat}, Lon: ${lon}`);
 
                             // Validar coordenadas
                             if (!isNaN(lat) && !isNaN(lon)) {
